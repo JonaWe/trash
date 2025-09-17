@@ -30,7 +30,7 @@ impl Command {
 fn parse_input(input: &str) -> Option<Command> {
     // for now we just split at whitespace
     // TODO: split correctly for quotes etc.
-    let splitted: Vec<&str> = input.split_whitespace().collect();
+    let splitted: Vec<&str> = input.trim().split_whitespace().collect();
 
     if splitted.is_empty() {
         return None
@@ -96,31 +96,22 @@ fn run_command(command: Command) {
 }
 
 fn main() {
-    print!("\n");
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
         let stdin = io::stdin();
         let mut input = String::new();
-        if stdin.lock().read_line(&mut input).is_err() {
-            continue;
+        let bytes_read = stdin.lock().read_line(&mut input).unwrap();
+
+        if bytes_read == 0 {
+            println!("\nexit");
+            exit(0);
         }
 
-        let input = input.trim();
-
-        if input.is_empty() {
-            continue;
-        }
-
-        if let Some(command) = parse_input(input) {
+        if let Some(command) = parse_input(input.as_str()) {
             command_handler(command);
         } else {
             continue;
         }
-
-        // let command = match parse_input(input) {
-        //     Some(cmd) => cmd,
-        //     None => continue,
-        // };
     }
 }
