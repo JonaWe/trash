@@ -1,7 +1,9 @@
-use nix::{sys::wait::waitpid,unistd::{fork, ForkResult, write, execvp}};
+use nix::{sys::wait::waitpid,unistd::{chdir, execvp, fork, write, ForkResult}};
 use std::io::{self, BufRead, Write};
 use std::ffi::CString;
 use std::process::exit;
+use std::env;
+use std::path::PathBuf;
 
 
 fn parse_input(input: &str) -> Vec<&str> {
@@ -17,7 +19,26 @@ fn command_handler(command: &str, args: Vec<&str>) {
             exit(0);
         }
         "cd" => {
-            println!("The change directory command is not yet implemented");
+            let target = if args.len() == 2 {
+                // TODO: handle last directory with -
+                PathBuf::from(args[1])
+            } else if args.len() == 1{
+                match env::var("HOME") {
+                    Ok(home) => PathBuf::from(home),
+                    Err(_) => {
+                        eprintln!("cd: HOME is not set");
+                        return;
+                    }
+                }
+            } else {
+                eprintln!("cd: too many arguments");
+                return
+            };
+
+            if let Err(e) = chdir(&target) {
+                eprintln!("cd: {}", e);
+                return;
+            }
         }
         _ => run_command(command, args),
     }
@@ -62,22 +83,11 @@ fn main() {
             continue;
         }
 
-        // let arguments: Vec<&str> = input.split_whitespace().collect();
         let arguments = parse_input(input);
 
-        // let command = CString::new(arguments[0]).unwrap();
-        // let args: Vec<CString> = arguments.iter()
-        //     .map(|s| CString::new(*s).unwrap())
-        //     .collect();
         let command = arguments[0];
         let args = arguments;
 
         command_handler(command, args);
-
-
-        // println!("{:#?}", command);
-        // println!("{:#?}", args);
-
-        // println!("{}", input);
     }
 }
