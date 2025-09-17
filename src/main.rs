@@ -5,24 +5,56 @@ use std::process::exit;
 use std::env;
 use std::path::PathBuf;
 
-
-fn parse_input(input: &str) -> Vec<&str> {
-    // for now we just split at whitespace
-    // TODO: split correctly for quotes etc.
-    input.split_whitespace().collect()
+struct Command {
+    // TODO: look into OsString for POSIX compatibility
+    cmd: String,
+    args: Vec<String>,
 }
 
-fn command_handler(command: &str, args: Vec<&str>) {
-    match command {
+impl Command {
+    fn cmd_as_cstring(&self) -> CString {
+        CString::new(self.cmd.as_str()).unwrap()
+    }
+    fn args_as_cstring(&self) -> Vec<CString> {
+        self.args.iter()
+            .map(|arg| CString::new(arg.as_str()).unwrap())
+            .collect()
+    }
+
+    fn new(cmd: String, args: Vec<String>) -> Self {
+        Self { cmd, args }
+    }
+}
+
+
+fn parse_input(input: &str) -> Option<Command> {
+    // for now we just split at whitespace
+    // TODO: split correctly for quotes etc.
+    let splitted: Vec<&str> = input.split_whitespace().collect();
+
+    if splitted.is_empty() {
+        return None
+    }
+
+    let cmd = splitted[0].to_string();
+    let args = splitted.iter()
+        .map(|arg| arg.to_string())
+        .collect();
+
+    Some(Command::new(cmd, args))
+}
+
+fn command_handler(command: Command) {
+    match command.cmd.as_str() {
         "exit" => {
             println!("exit");
             exit(0);
         }
         "cd" => {
-            let target = if args.len() == 2 {
+            let target = if command.args.len() == 2 {
                 // TODO: handle last directory with -
-                PathBuf::from(args[1])
-            } else if args.len() == 1{
+                PathBuf::from(command.args[1].as_str())
+            } else if command.args.len() == 1{
                 match env::var("HOME") {
                     Ok(home) => PathBuf::from(home),
                     Err(_) => {
@@ -40,24 +72,21 @@ fn command_handler(command: &str, args: Vec<&str>) {
                 return;
             }
         }
-        _ => run_command(command, args),
+        _ => run_command(command),
     }
 
 }
 
-fn run_command(command: &str, args: Vec<&str>) {
+fn run_command(command: Command) {
     match unsafe{fork()} {
         Ok(ForkResult::Parent { child, .. }) => {
+            // TODO: handle potential errors here
             waitpid(child, None).unwrap();
         }
         Ok(ForkResult::Child) => {
             // Unsafe to use `println!` (or `unwrap`) here. See Safety.
             // write(std::io::stdout(), "I'm a new child process\n".as_bytes()).ok();
-            let c_command = CString::new(command).unwrap();
-            let c_args: Vec<CString> = args.iter()
-                .map(|str| CString::new(*str).unwrap())
-                .collect();
-            let _ = execvp(&c_command, &c_args);
+            let _ = execvp(&command.cmd_as_cstring(), &command.args_as_cstring());
             write(std::io::stdout(), "Command not found!\n".as_bytes()).ok();
             std::process::exit(1);
             // unsafe { libc::_exit(0) };
@@ -83,11 +112,15 @@ fn main() {
             continue;
         }
 
-        let arguments = parse_input(input);
+        if let Some(command) = parse_input(input) {
+            command_handler(command);
+        } else {
+            continue;
+        }
 
-        let command = arguments[0];
-        let args = arguments;
-
-        command_handler(command, args);
+        // let command = match parse_input(input) {
+        //     Some(cmd) => cmd,
+        //     None => continue,
+        // };
     }
 }
