@@ -4,6 +4,7 @@ use std::ffi::CString;
 use std::process::exit;
 use std::env;
 use std::path::PathBuf;
+use regex::Regex;
 
 struct Command {
     // TODO: look into OsString for POSIX compatibility
@@ -24,6 +25,16 @@ impl Command {
     fn new(cmd: String, args: Vec<String>) -> Self {
         Self { cmd, args }
     }
+}
+
+fn replace_variables(input: String) -> String {
+    let re = Regex::new(r"\$([a-zA-Z0-9_]+|\$|!)").unwrap();
+
+    let result = re.replace_all(input.as_str(), |captures: &regex::Captures| {
+        let var_name = &captures[1];
+        env::var(var_name).unwrap_or_else(|_| "".to_string())
+    });
+    result.into_owned()
 }
 
 
@@ -107,6 +118,8 @@ fn main() {
             println!("\nexit");
             exit(0);
         }
+
+        input = replace_variables(input);
 
         if let Some(command) = parse_input(input.as_str()) {
             command_handler(command);
