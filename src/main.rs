@@ -1,4 +1,4 @@
-use nix::{sys::wait::waitpid,unistd::{chdir, execvp, fork, write, ForkResult}};
+use nix::{sys::{signal::{signal, kill, SigHandler, Signal::{self, SIGTSTP, SIGTTIN, SIGTTOU}}, wait::waitpid}, unistd::{chdir, execvp, fork, getpgrp, getpid, setpgid, tcgetpgrp, tcsetpgrp, write, ForkResult, Pid}};
 use std::io::{self, BufRead, Write};
 use std::ffi::CString;
 use std::process::exit;
@@ -83,30 +83,53 @@ fn command_handler(command: Command) {
                 return;
             }
         }
-        _ => run_command(command),
+        _ => {
+            let _ = run_command(command);
+        }
     }
 
 }
 
-fn run_command(command: Command) {
+fn claim_terminal() -> nix::Result<()> {
+    // ignore signals
+    unsafe {
+        // required when shell process is not foreground and uses tcsetpgrp
+        signal(SIGTTOU, SigHandler::SigIgn)?;
+        // required for ignoring ctrl-z
+        signal(SIGTSTP, SigHandler::SigIgn)?;
+    }
+    let shell_pid = getpid();
+    setpgid(shell_pid, shell_pid)?;
+    tcsetpgrp(&std::io::stdin(), shell_pid)?;
+    Ok(())
+}
+
+fn run_command(command: Command) -> nix::Result<()> {
     match unsafe{fork()} {
         Ok(ForkResult::Parent { child, .. }) => {
-            // TODO: handle potential errors here
+            let _ = setpgid(child, child);
+            let _ = tcsetpgrp(&std::io::stdin(), child);
+            // maybe WUNTRACED/WCONTINUED later for ctrl-z job controll
             waitpid(child, None).unwrap();
+            let pgid = getpgrp();
+            tcsetpgrp(&std::io::stdin(), pgid)?;
+            Ok(())
         }
         Ok(ForkResult::Child) => {
-            // Unsafe to use `println!` (or `unwrap`) here. See Safety.
-            // write(std::io::stdout(), "I'm a new child process\n".as_bytes()).ok();
+            let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
             let _ = execvp(&command.cmd_as_cstring(), &command.args_as_cstring());
-            write(std::io::stdout(), "Command not found!\n".as_bytes()).ok();
-            std::process::exit(1);
-            // unsafe { libc::_exit(0) };
+            write(std::io::stdout(), b"command not found\n").ok();
+            unsafe { libc::_exit(127) };
         }
-        Err(_) => println!("Fork failed"),
+        Err(_) => {
+            println!("Fork failed");
+            Ok(())
+        }
     }
 }
 
 fn main() {
+    claim_terminal().expect("Failed to get foreground for terminal");
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
