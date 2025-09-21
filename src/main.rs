@@ -25,6 +25,59 @@ impl Command {
     fn new(cmd: String, args: Vec<String>) -> Self {
         Self { cmd, args }
     }
+
+    fn execute(&self) {
+        match self.cmd.as_str() {
+            "exit" => {
+                println!("exit");
+                exit(0);
+            }
+            "cd" => {
+                let target = if self.args.len() == 2 {
+                    // TODO: handle last directory with -
+                    PathBuf::from(self.args[1].as_str())
+                } else if self.args.len() == 1{
+                    match env::var("HOME") {
+                        Ok(home) => PathBuf::from(home),
+                        Err(_) => {
+                            eprintln!("cd: HOME is not set");
+                            return;
+                        }
+                    }
+                } else {
+                    eprintln!("cd: too many arguments");
+                    return
+                };
+
+                if let Err(e) = chdir(&target) {
+                    eprintln!("cd: {}", e);
+                    return;
+                }
+            }
+            _ => {
+                match unsafe{fork()} {
+                    Ok(ForkResult::Parent { child, .. }) => {
+                        let _ = setpgid(child, child);
+                        let _ = tcsetpgrp(&std::io::stdin(), child);
+                        // maybe WUNTRACED/WCONTINUED later for ctrl-z job controll
+                        waitpid(child, None).unwrap();
+                        let pgid = getpgrp();
+                        let _ = tcsetpgrp(&std::io::stdin(), pgid);
+                    }
+                    Ok(ForkResult::Child) => {
+                        let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
+                        let _ = execvp(&self.cmd_as_cstring(), &self.args_as_cstring());
+                        write(std::io::stdout(), b"command not found\n").ok();
+                        unsafe { libc::_exit(127) };
+                    }
+                    Err(_) => {
+                        println!("Fork failed");
+                    }
+                }
+            }
+
+        }
+    }
 }
 
 fn replace_variables(input: String) -> String {
@@ -55,40 +108,6 @@ fn parse_input(input: &str) -> Option<Command> {
     Some(Command::new(cmd, args))
 }
 
-fn command_handler(command: Command) {
-    match command.cmd.as_str() {
-        "exit" => {
-            println!("exit");
-            exit(0);
-        }
-        "cd" => {
-            let target = if command.args.len() == 2 {
-                // TODO: handle last directory with -
-                PathBuf::from(command.args[1].as_str())
-            } else if command.args.len() == 1{
-                match env::var("HOME") {
-                    Ok(home) => PathBuf::from(home),
-                    Err(_) => {
-                        eprintln!("cd: HOME is not set");
-                        return;
-                    }
-                }
-            } else {
-                eprintln!("cd: too many arguments");
-                return
-            };
-
-            if let Err(e) = chdir(&target) {
-                eprintln!("cd: {}", e);
-                return;
-            }
-        }
-        _ => {
-            let _ = run_command(command);
-        }
-    }
-
-}
 
 fn claim_terminal() -> nix::Result<()> {
     // ignore signals
@@ -104,34 +123,10 @@ fn claim_terminal() -> nix::Result<()> {
     Ok(())
 }
 
-fn run_command(command: Command) -> nix::Result<()> {
-    match unsafe{fork()} {
-        Ok(ForkResult::Parent { child, .. }) => {
-            let _ = setpgid(child, child);
-            let _ = tcsetpgrp(&std::io::stdin(), child);
-            // maybe WUNTRACED/WCONTINUED later for ctrl-z job controll
-            waitpid(child, None).unwrap();
-            let pgid = getpgrp();
-            tcsetpgrp(&std::io::stdin(), pgid)?;
-            Ok(())
-        }
-        Ok(ForkResult::Child) => {
-            let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
-            let _ = execvp(&command.cmd_as_cstring(), &command.args_as_cstring());
-            write(std::io::stdout(), b"command not found\n").ok();
-            unsafe { libc::_exit(127) };
-        }
-        Err(_) => {
-            println!("Fork failed");
-            Ok(())
-        }
-    }
-}
-
 fn main() {
     claim_terminal().expect("Failed to get foreground for terminal");
     loop {
-        print!("$ ");
+        print!("\n$ ");
         io::stdout().flush().unwrap();
         let stdin = io::stdin();
         let mut input = String::new();
@@ -145,7 +140,7 @@ fn main() {
         input = replace_variables(input);
 
         if let Some(command) = parse_input(input.as_str()) {
-            command_handler(command);
+            command.execute();
         } else {
             continue;
         }
