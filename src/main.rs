@@ -65,7 +65,7 @@ impl Parser {
                     current.clear();
                 }
                 '\'' if !double_quotes => {
-                    if !current.is_empty() {
+                    if !current.trim().is_empty() {
                         let quoting = if single_quotes {
                             Quoting::SingleQuoted
                         } else {
@@ -73,11 +73,13 @@ impl Parser {
                         };
                         tokens.push(Token::Word(current.clone(), quoting));
                         current.clear();
+                    } else if current.trim().is_empty() && !single_quotes {
+                        current.clear();
                     }
                     single_quotes = !single_quotes;
                 }
                 '"' if !single_quotes => {
-                    if !current.is_empty() {
+                    if !current.trim().is_empty() {
                         let quoting = if double_quotes {
                             Quoting::DoubleQuoted
                         } else {
@@ -85,11 +87,13 @@ impl Parser {
                         };
                         tokens.push(Token::Word(current.clone(), quoting));
                         current.clear();
+                    } else if current.trim().is_empty() && !double_quotes {
+                        current.clear();
                     }
                     double_quotes = !double_quotes;
                 }
                 '&' if !single_quotes && !double_quotes => {
-                    if !current.is_empty() {
+                    if !current.trim().is_empty() {
                         tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
                         current.clear();
                     }
@@ -105,7 +109,7 @@ impl Parser {
                     }
                 }
                 ';' if !single_quotes && !double_quotes => {
-                    if !current.is_empty() {
+                    if !current.trim().is_empty() {
                         tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
                         current.clear();
                     }
@@ -119,7 +123,7 @@ impl Parser {
         }
 
         // for now if a quote is opened and not closed the whole content is just discarded
-        if !current.is_empty() && !single_quotes && !double_quotes {
+        if !current.trim().is_empty() && !single_quotes && !double_quotes {
             tokens.push(Token::Word(current, Quoting::Unquoted));
         }
 
@@ -358,4 +362,31 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_single_and_double_quotes_with_space() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo 'hello' \"world\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("hello".into(), Quoting::SingleQuoted),
+                Token::Word("world".into(), Quoting::DoubleQuoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_single_and_double_quotes_without_space() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo 'hello'\"world\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("hello".into(), Quoting::SingleQuoted),
+                Token::Word("world".into(), Quoting::DoubleQuoted),
+            ]
+        );
+    }
 }
