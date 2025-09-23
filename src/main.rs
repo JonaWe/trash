@@ -59,6 +59,11 @@ impl Parser {
         let mut current = String::new();
 
         while let Some(current_char) = chars.next() {
+            // remove preceding whitespace
+            if !single_quotes && !double_quotes && current.trim().is_empty() {
+                current.clear();
+            }
+
             match current_char {
                 _ if current_char.is_whitespace() && !current.is_empty() && !single_quotes && !double_quotes => {
                     tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
@@ -73,8 +78,6 @@ impl Parser {
                         };
                         tokens.push(Token::Word(current.clone(), quoting));
                         current.clear();
-                    } else if current.trim().is_empty() && !single_quotes {
-                        current.clear();
                     }
                     single_quotes = !single_quotes;
                 }
@@ -86,8 +89,6 @@ impl Parser {
                             Quoting::Unquoted
                         };
                         tokens.push(Token::Word(current.clone(), quoting));
-                        current.clear();
-                    } else if current.trim().is_empty() && !double_quotes {
                         current.clear();
                     }
                     double_quotes = !double_quotes;
@@ -107,16 +108,15 @@ impl Parser {
                     } else {
                         tokens.push(Token::Operator(Operator::Andpercent));
                     }
+                    current.clear()
                 }
                 ';' if !single_quotes && !double_quotes => {
                     if !current.trim().is_empty() {
                         tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
                         current.clear();
                     }
-                    tokens.push(Token::Operator(Operator::And));
-                }
-                ch if single_quotes => {
-                    current.push(ch);
+                    tokens.push(Token::Operator(Operator::Semicolon));
+                    current.clear()
                 }
                 _ => current.push(current_char)
             }
@@ -386,6 +386,48 @@ mod test {
                 Token::Word("echo".into(), Quoting::Unquoted),
                 Token::Word("hello".into(), Quoting::SingleQuoted),
                 Token::Word("world".into(), Quoting::DoubleQuoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_single_and_double_inside_eachother() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo 'he\"llo' \"w'orld\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("he\"llo".into(), Quoting::SingleQuoted),
+                Token::Word("w'orld".into(), Quoting::DoubleQuoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_semicolon() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo hi;");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("hi".into(), Quoting::Unquoted),
+                Token::Operator(Operator::Semicolon),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_and() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("hello && world");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("hello".into(), Quoting::Unquoted),
+                Token::Operator(Operator::And),
+                Token::Word("world".into(), Quoting::Unquoted),
             ]
         );
     }
