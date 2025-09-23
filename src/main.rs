@@ -60,7 +60,7 @@ impl Parser {
 
         while let Some(current_char) = chars.next() {
             match current_char {
-                _ if current_char.is_whitespace() && !current.is_empty() => {
+                _ if current_char.is_whitespace() && !current.is_empty() && !single_quotes && !double_quotes => {
                     tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
                     current.clear();
                 }
@@ -78,7 +78,7 @@ impl Parser {
                 }
                 '"' if !single_quotes => {
                     if !current.is_empty() {
-                        let quoting = if single_quotes {
+                        let quoting = if double_quotes {
                             Quoting::DoubleQuoted
                         } else {
                             Quoting::Unquoted
@@ -328,6 +328,32 @@ mod test {
                 Token::Word("echo".into(), Quoting::Unquoted),
                 Token::Word("hello".into(), Quoting::Unquoted),
                 Token::Word("world".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_single_quotes() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo 'hello world'");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("hello world".into(), Quoting::SingleQuoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_double_quotes() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo \"hello world\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("hello world".into(), Quoting::DoubleQuoted),
             ]
         );
     }
