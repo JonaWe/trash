@@ -16,12 +16,14 @@ enum BuiltinCommand {
     Cd(Vec<String>),
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Quoting {
     Unquoted,
     SingleQuoted,
     DoubleQuoted,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Operator {
     And,
     Or,
@@ -30,6 +32,7 @@ enum Operator {
     Semicolon,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Token {
     Word(String, Quoting),
     Operator(Operator),
@@ -310,4 +313,23 @@ impl ExternalCommand {
 fn main() {
     let mut shell = Shell::new().expect("Failed to spawn shell");
     shell.run().expect("Failed to run shell");
+}
+
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_simple_words() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo hello world");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Word("hello".into(), Quoting::Unquoted),
+                Token::Word("world".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
 }
