@@ -16,99 +16,111 @@ enum BuiltinCommand {
     Cd(Vec<String>),
 }
 
-enum Token {
-    Andpercent,
-    Semicolon,
+enum Quoting {
+    Unquoted,
+    SingleQuoted,
+    DoubleQuoted,
+}
+
+enum Operator {
     And,
     Or,
     Pipe,
-    Word(String),
-    /// for single quote strings that do not expand variables
-    LiteralWord(String),
+    Andpercent,
+    Semicolon,
 }
 
-
-
-fn tokenize(input: &str) -> Vec<Token> {
-    let mut single_quotes = false;
-    let mut double_quotes = false;
-    let mut chars  = input.chars().peekable();
-    let mut tokens: Vec<Token> = Vec::new();
-    let mut current = String::new();
-
-    while let Some(current_char) = chars.next() {
-        match current_char {
-            _ if current_char.is_whitespace() && !current.is_empty() => {
-                tokens.push(Token::Word(current.clone()));
-                current.clear();
-            }
-            '\'' if !double_quotes => {
-                if !current.is_empty() {
-                    let word = if single_quotes {
-                        Token::LiteralWord(current.clone())
-                    } else {
-                        Token::Word(current.clone())
-                    };
-                    tokens.push(word);
-                    current.clear();
-                }
-                single_quotes = !single_quotes;
-            }
-            '"' if !single_quotes => {
-                if !current.is_empty() {
-                    tokens.push(Token::Word(current.clone()));
-                    current.clear();
-                }
-                double_quotes = !double_quotes;
-            }
-            '&' if !single_quotes && !double_quotes => {
-                if !current.is_empty() {
-                    tokens.push(Token::Word(current.clone()));
-                    current.clear();
-                }
-                if let Some(&ch) = chars.peek() {
-                    if ch == '&' {
-                        chars.next();
-                        tokens.push(Token::And);
-                    } else {
-                        tokens.push(Token::Andpercent);
-                    }
-                } else {
-                    tokens.push(Token::Andpercent);
-                }
-            }
-            ';' if !single_quotes && !double_quotes => {
-                if !current.is_empty() {
-                    tokens.push(Token::Word(current.clone()));
-                    current.clear();
-                }
-                tokens.push(Token::Semicolon);
-            }
-            ch if single_quotes => {
-                current.push(ch);
-            }
-            _ => current.push(current_char)
-        }
-    }
-
-    // for now if a quote is opened and not closed the whole content is just discarded
-    if !current.is_empty() && !single_quotes && !double_quotes {
-        tokens.push(Token::Word(current));
-    }
-
-    tokens
+enum Token {
+    Word(String, Quoting),
+    Operator(Operator),
 }
+
 
 struct Parser {
-    // variable_regex: Regex,
+    variable_regex: Regex,
 }
 
 impl Parser {
     fn new() -> Self {
-        // let variable_regex = Regex::new(r"\$([a-zA-Z0-9_]+|\$|!)").unwrap();
+        let variable_regex = Regex::new(r"\$([a-zA-Z0-9_]+|\$|!)").unwrap();
         Self {
-            // variable_regex,
+            variable_regex,
         }
+    }
+
+    fn tokenize(&self, input: &str) -> Vec<Token> {
+        let mut single_quotes = false;
+        let mut double_quotes = false;
+        let mut chars  = input.chars().peekable();
+        let mut tokens: Vec<Token> = Vec::new();
+        let mut current = String::new();
+
+        while let Some(current_char) = chars.next() {
+            match current_char {
+                _ if current_char.is_whitespace() && !current.is_empty() => {
+                    tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
+                    current.clear();
+                }
+                '\'' if !double_quotes => {
+                    if !current.is_empty() {
+                        let quoting = if single_quotes {
+                            Quoting::SingleQuoted
+                        } else {
+                            Quoting::Unquoted
+                        };
+                        tokens.push(Token::Word(current.clone(), quoting));
+                        current.clear();
+                    }
+                    single_quotes = !single_quotes;
+                }
+                '"' if !single_quotes => {
+                    if !current.is_empty() {
+                        let quoting = if single_quotes {
+                            Quoting::DoubleQuoted
+                        } else {
+                            Quoting::Unquoted
+                        };
+                        tokens.push(Token::Word(current.clone(), quoting));
+                        current.clear();
+                    }
+                    double_quotes = !double_quotes;
+                }
+                '&' if !single_quotes && !double_quotes => {
+                    if !current.is_empty() {
+                        tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
+                        current.clear();
+                    }
+                    if let Some(&ch) = chars.peek() {
+                        if ch == '&' {
+                            chars.next();
+                            tokens.push(Token::Operator(Operator::And));
+                        } else {
+                            tokens.push(Token::Operator(Operator::Andpercent));
+                        }
+                    } else {
+                        tokens.push(Token::Operator(Operator::Andpercent));
+                    }
+                }
+                ';' if !single_quotes && !double_quotes => {
+                    if !current.is_empty() {
+                        tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
+                        current.clear();
+                    }
+                    tokens.push(Token::Operator(Operator::And));
+                }
+                ch if single_quotes => {
+                    current.push(ch);
+                }
+                _ => current.push(current_char)
+            }
+        }
+
+        // for now if a quote is opened and not closed the whole content is just discarded
+        if !current.is_empty() && !single_quotes && !double_quotes {
+            tokens.push(Token::Word(current, Quoting::Unquoted));
+        }
+
+        tokens
     }
 
     fn parse(&self, tokens: Vec<Token>) -> Option<Command> {
@@ -117,7 +129,13 @@ impl Parser {
         } else {
             let args: Vec<String> = tokens.into_iter().filter_map(|token| {
                 match token {
-                    Token::Word(word) => Some(word),
+                    Token::Word(word, Quoting::SingleQuoted) => Some(word),
+                    Token::Word(word, _) => {
+                        Some(self.variable_regex.replace_all(word.as_str(), |caps: &regex::Captures| {
+                            let k = &caps[1];
+                            env::var(k).unwrap_or_default()
+                        }).into_owned())
+                    },
                     _ => None,
                 }
             }).collect();
@@ -183,7 +201,7 @@ impl Shell {
                 exit(0);
             }
 
-            let tokens = tokenize(input.as_str());
+            let tokens = parser.tokenize(input.as_str());
 
             if let Some(command) = parser.parse(tokens) {
                 self.execute(command)?;
