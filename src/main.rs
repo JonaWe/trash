@@ -82,7 +82,7 @@ impl Parser {
                     }
                 }
                 '\'' if !double_quotes => {
-                    if !current.trim().is_empty() {
+                    if !current.is_empty() {
                         let quoting = if single_quotes {
                             Quoting::SingleQuoted
                         } else {
@@ -94,7 +94,7 @@ impl Parser {
                     single_quotes = !single_quotes;
                 }
                 '"' if !single_quotes => {
-                    if !current.trim().is_empty() {
+                    if !current.is_empty() {
                         let quoting = if double_quotes {
                             Quoting::DoubleQuoted
                         } else {
@@ -129,6 +129,17 @@ impl Parser {
                     }
                     tokens.push(Token::Operator(Operator::Semicolon));
                     current.clear()
+                }
+                '\\' => {
+                    if let Some(_) = chars.peek() {
+                        match chars.next().unwrap() {
+                            'n' => current.push('\n'),
+                            't' => current.push('\t'),
+                            'r' => current.push('\r'),
+                            '0' => current.push('\0'),
+                            ch => current.push(ch),
+                        }
+                    }
                 }
                 _ => current.push(current_char),
             }
@@ -462,6 +473,48 @@ mod test {
                 Token::Word("echo".into(), Quoting::Unquoted),
                 Token::Whitespace,
                 Token::Word("hi".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_escaping_double_quotes() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo \\\"hi\\\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Word("\"hi\"".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_escaping_backslash() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo \\\\");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Word("\\".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_escaping_newline() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo \"\\n\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Word("\n".into(), Quoting::DoubleQuoted),
             ]
         );
     }
