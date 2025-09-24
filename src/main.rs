@@ -120,7 +120,24 @@ impl Parser {
                     } else {
                         tokens.push(Token::Operator(Operator::Andpercent));
                     }
-                    current.clear()
+                    current.clear();
+                }
+                '|' if !single_quotes && !double_quotes => {
+                    if !current.trim().is_empty() {
+                        tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
+                        current.clear();
+                    }
+                    if let Some(&ch) = chars.peek() {
+                        if ch == '|' {
+                            chars.next();
+                            tokens.push(Token::Operator(Operator::Or));
+                        } else {
+                            tokens.push(Token::Operator(Operator::Pipe));
+                        }
+                    } else {
+                        tokens.push(Token::Operator(Operator::Pipe));
+                    }
+                    current.clear();
                 }
                 ';' if !single_quotes && !double_quotes => {
                     if !current.trim().is_empty() {
@@ -128,17 +145,18 @@ impl Parser {
                         current.clear();
                     }
                     tokens.push(Token::Operator(Operator::Semicolon));
-                    current.clear()
+                    current.clear();
                 }
                 '\\' => {
-                    if let Some(_) = chars.peek() {
-                        match chars.next().unwrap() {
+                    if let Some(&ch) = chars.peek() {
+                        chars.next();
+                        match ch {
                             'n' => current.push('\n'),
                             't' => current.push('\t'),
                             'r' => current.push('\r'),
                             '0' => current.push('\0'),
                             ch => current.push(ch),
-                        }
+                        };
                     }
                 }
                 _ => current.push(current_char),
@@ -459,6 +477,54 @@ mod test {
                 Token::Operator(Operator::And),
                 Token::Whitespace,
                 Token::Word("world".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_andpercent() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("ls &");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("ls".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Operator(Operator::Andpercent),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_pipe() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo 'hi' | cat");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Word("hi".into(), Quoting::SingleQuoted),
+                Token::Whitespace,
+                Token::Operator(Operator::Pipe),
+                Token::Whitespace,
+                Token::Word("cat".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_simple_or() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("no || yes");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("no".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Operator(Operator::Or),
+                Token::Whitespace,
+                Token::Word("yes".into(), Quoting::Unquoted),
             ]
         );
     }
