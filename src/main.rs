@@ -1,5 +1,5 @@
 use nix::sys::signal::{SigHandler, Signal, signal};
-use nix::sys::wait::{waitpid, WaitStatus};
+use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::{
     ForkResult, Pid, chdir, execvp, fork, getpid, setpgid, tcsetpgrp, write,
 };
@@ -263,6 +263,9 @@ impl Shell {
                 let status = self.spawn_foreground(external)?;
                 if let WaitStatus::Exited(_, code) = status {
                     self.last_status = code;
+                } else if let WaitStatus::Stopped(child_pid, signal) = status {
+                    // TODO: add to job table
+                    println!("\n{} suspended", child_pid);
                 }
                 Ok(())
             },
@@ -275,11 +278,16 @@ impl Shell {
                 let _ = setpgid(child, child);
                 let _ = tcsetpgrp(&std::io::stdin(), child);
                 // maybe WUNTRACED/WCONTINUED later for ctrl-z job controll
-                let status = waitpid(child, None)?;
+                let status = waitpid(child, Some(WaitPidFlag::WUNTRACED))?;
                 let _ = tcsetpgrp(&std::io::stdin(), self.shell_pid);
                 Ok(status)
             }
             Ok(ForkResult::Child) => {
+                // reset signal handlers
+                unsafe {
+                    signal(Signal::SIGTSTP, SigHandler::SigDfl)?;
+                    signal(Signal::SIGTTOU, SigHandler::SigDfl)?;
+                }
                 let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
                 let _ = execvp(&command.cmd_as_cstring(), &command.args_as_cstring());
                 write(std::io::stdout(), b"command not found\n").ok();
