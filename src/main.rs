@@ -1,10 +1,14 @@
-use nix::{sys::{signal::{signal, SigHandler, Signal}, wait::waitpid}, unistd::{chdir, execvp, fork, getpgrp, getpid, setpgid, tcsetpgrp, write, ForkResult, Pid}};
-use std::{io::{BufRead, Write}};
-use std::ffi::CString;
-use std::process::exit;
-use std::env;
-use std::path::PathBuf;
+use nix::sys::signal::{SigHandler, Signal, signal};
+use nix::sys::wait::waitpid;
+use nix::unistd::{
+    ForkResult, Pid, chdir, execvp, fork, getpgrp, getpid, setpgid, tcsetpgrp, write,
+};
 use regex::Regex;
+use std::env;
+use std::ffi::CString;
+use std::io::{BufRead, Write};
+use std::path::PathBuf;
+use std::process::exit;
 
 enum Command {
     Builtin(BuiltinCommand),
@@ -38,7 +42,6 @@ enum Token {
     Operator(Operator),
 }
 
-
 struct Parser {
     variable_regex: Regex,
 }
@@ -46,15 +49,13 @@ struct Parser {
 impl Parser {
     fn new() -> Self {
         let variable_regex = Regex::new(r"\$([a-zA-Z0-9_]+|\$|!)").unwrap();
-        Self {
-            variable_regex,
-        }
+        Self { variable_regex }
     }
 
     fn tokenize(&self, input: &str) -> Vec<Token> {
         let mut single_quotes = false;
         let mut double_quotes = false;
-        let mut chars  = input.chars().peekable();
+        let mut chars = input.chars().peekable();
         let mut tokens: Vec<Token> = Vec::new();
         let mut current = String::new();
 
@@ -65,7 +66,11 @@ impl Parser {
             }
 
             match current_char {
-                _ if current_char.is_whitespace() && !current.is_empty() && !single_quotes && !double_quotes => {
+                _ if current_char.is_whitespace()
+                    && !current.is_empty()
+                    && !single_quotes
+                    && !double_quotes =>
+                {
                     tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
                     current.clear();
                 }
@@ -118,7 +123,7 @@ impl Parser {
                     tokens.push(Token::Operator(Operator::Semicolon));
                     current.clear()
                 }
-                _ => current.push(current_char)
+                _ => current.push(current_char),
             }
         }
 
@@ -134,18 +139,21 @@ impl Parser {
         if tokens.is_empty() {
             None
         } else {
-            let args: Vec<String> = tokens.into_iter().filter_map(|token| {
-                match token {
+            let args: Vec<String> = tokens
+                .into_iter()
+                .filter_map(|token| match token {
                     Token::Word(word, Quoting::SingleQuoted) => Some(word),
-                    Token::Word(word, _) => {
-                        Some(self.variable_regex.replace_all(word.as_str(), |caps: &regex::Captures| {
-                            let k = &caps[1];
-                            env::var(k).unwrap_or_default()
-                        }).into_owned())
-                    },
+                    Token::Word(word, _) => Some(
+                        self.variable_regex
+                            .replace_all(word.as_str(), |caps: &regex::Captures| {
+                                let k = &caps[1];
+                                env::var(k).unwrap_or_default()
+                            })
+                            .into_owned(),
+                    ),
                     _ => None,
-                }
-            }).collect();
+                })
+                .collect();
 
             match args[0].as_str() {
                 "exit" => Some(Command::Builtin(BuiltinCommand::Exit)),
@@ -153,7 +161,7 @@ impl Parser {
                 command => {
                     let external_command = ExternalCommand::new(command.to_string(), args);
                     Some(Command::External(external_command))
-                },
+                }
             }
         }
     }
@@ -218,17 +226,13 @@ impl Shell {
 
     fn execute(&self, command: Command) -> nix::Result<()> {
         match command {
-            Command::Builtin(builtin) => {
-                self.handle_builtin(builtin)
-            }
-            Command::External(external) => {
-                self.spawn_foreground(external)
-            }
+            Command::Builtin(builtin) => self.handle_builtin(builtin),
+            Command::External(external) => self.spawn_foreground(external),
         }
     }
 
     fn spawn_foreground(&self, command: ExternalCommand) -> nix::Result<()> {
-        match unsafe{fork()} {
+        match unsafe { fork() } {
             Ok(ForkResult::Parent { child, .. }) => {
                 let _ = setpgid(child, child);
                 let _ = tcsetpgrp(&std::io::stdin(), child);
@@ -261,7 +265,7 @@ impl Shell {
                     // TODO: handle last directory with -
                     // TODO: handle home with ~
                     PathBuf::from(args[1].as_str())
-                } else if args.len() == 1{
+                } else if args.len() == 1 {
                     match env::var("HOME") {
                         Ok(home) => PathBuf::from(home),
                         Err(_) => {
@@ -286,7 +290,6 @@ impl Shell {
     }
 }
 
-
 struct ExternalCommand {
     // TODO: look into OsString for POSIX compatibility
     cmd: String,
@@ -297,10 +300,7 @@ struct ExternalCommand {
 
 impl ExternalCommand {
     fn new(cmd: String, args: Vec<String>) -> Self {
-        Self {
-            cmd,
-            args,
-        }
+        Self { cmd, args }
     }
 
     fn cmd_as_cstring(&self) -> CString {
@@ -308,7 +308,8 @@ impl ExternalCommand {
     }
 
     fn args_as_cstring(&self) -> Vec<CString> {
-        self.args.iter()
+        self.args
+            .iter()
             .map(|arg| CString::new(arg.as_str()).unwrap())
             .collect()
     }
