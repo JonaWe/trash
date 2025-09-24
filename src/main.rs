@@ -1,7 +1,7 @@
 use nix::sys::signal::{SigHandler, Signal, signal};
-use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::{
-    ForkResult, Pid, chdir, execvp, fork, getpid, setpgid, tcsetpgrp, write,
+    ForkResult, Pid, chdir, execvp, fork, getcwd, getpid, setpgid, tcsetpgrp, write,
 };
 use regex::Regex;
 use std::env;
@@ -258,7 +258,10 @@ impl Shell {
 
     fn execute(&mut self, command: Command) -> nix::Result<()> {
         match command {
-            Command::Builtin(builtin) => self.handle_builtin(builtin),
+            Command::Builtin(builtin) => {
+                let _ = self.handle_builtin(builtin);
+                Ok(())
+            }
             Command::External(external) => {
                 let status = self.spawn_foreground(external)?;
                 if let WaitStatus::Exited(_, code) = status {
@@ -268,7 +271,7 @@ impl Shell {
                     println!("\n{} suspended", child_pid);
                 }
                 Ok(())
-            },
+            }
         }
     }
 
@@ -307,27 +310,46 @@ impl Shell {
                 exit(0);
             }
             BuiltinCommand::Cd(args) => {
-                let target = if args.len() == 2 {
-                    // TODO: handle last directory with -
-                    // TODO: handle home with ~
-                    PathBuf::from(args[1].as_str())
-                } else if args.len() == 1 {
-                    match env::var("HOME") {
-                        Ok(home) => PathBuf::from(home),
-                        Err(_) => {
-                            eprintln!("cd: HOME is not set");
-                            return Err(nix::Error::EINVAL);
+                let target = match &args[1..] {
+                    [] => {
+                        match env::var("HOME") {
+                            Ok(home) => PathBuf::from(home),
+                            Err(_) => {
+                                eprintln!("cd: HOME is not set");
+                                return Err(nix::Error::EINVAL);
+                            }
                         }
                     }
-                } else {
-                    eprintln!("cd: too many arguments");
-                    return Err(nix::Error::EINVAL);
+                    [_, dir] if dir == "-" => {
+                        match env::var("OLDPWD") {
+                            Ok(oldpwd) => {
+                                println!("{}", oldpwd);
+                                PathBuf::from(oldpwd)
+                            }
+                            Err(_) => {
+                                eprintln!("cd: OLDPWD is not set");
+                                return Err(nix::Error::EINVAL);
+                            }
+                        }
+                    }
+                    [_, dir] => PathBuf::from(dir),
+                    _ => {
+                        eprintln!("cd: too many arguments");
+                        return Err(nix::Error::EINVAL);
+                    }
                 };
 
-                // TODO: handle cd - with OLDPWD env variable
-                // TODO: set new PWD variable
+                let pwd = getcwd()?;
+
                 if let Err(e) = chdir(&target) {
                     eprintln!("cd: {}", e);
+                } else {
+                    // update PWD and OLDPWD
+                    unsafe {
+                        let new_pwd = getcwd()?;
+                        env::set_var("OLDPWD", pwd.as_os_str());
+                        env::set_var("PWD", new_pwd.as_os_str());
+                    };
                 }
             }
         }
