@@ -40,6 +40,7 @@ enum Operator {
 enum Token {
     Word(String, Quoting),
     Operator(Operator),
+    Whitespace,
 }
 
 struct Parser {
@@ -66,13 +67,19 @@ impl Parser {
             }
 
             match current_char {
-                _ if current_char.is_whitespace()
-                    && !current.is_empty()
-                    && !single_quotes
-                    && !double_quotes =>
-                {
-                    tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
-                    current.clear();
+                _ if current_char.is_whitespace() && !single_quotes && !double_quotes => {
+                    if !current.trim().is_empty() {
+                        tokens.push(Token::Word(current.clone(), Quoting::Unquoted));
+                        current.clear();
+                    }
+                    // only push if last token is not whitespace
+                    match tokens.last() {
+                        Some(Token::Whitespace) => {}
+                        _ => {
+                            tokens.push(Token::Whitespace);
+                            current.clear();
+                        }
+                    }
                 }
                 '\'' if !double_quotes => {
                     if !current.trim().is_empty() {
@@ -331,7 +338,9 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("hello".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("world".into(), Quoting::Unquoted),
             ]
         );
@@ -345,6 +354,7 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("hello world".into(), Quoting::SingleQuoted),
             ]
         );
@@ -358,6 +368,7 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("hello world".into(), Quoting::DoubleQuoted),
             ]
         );
@@ -371,7 +382,9 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("hello".into(), Quoting::SingleQuoted),
+                Token::Whitespace,
                 Token::Word("world".into(), Quoting::DoubleQuoted),
             ]
         );
@@ -385,6 +398,7 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("hello".into(), Quoting::SingleQuoted),
                 Token::Word("world".into(), Quoting::DoubleQuoted),
             ]
@@ -399,7 +413,9 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("he\"llo".into(), Quoting::SingleQuoted),
+                Token::Whitespace,
                 Token::Word("w'orld".into(), Quoting::DoubleQuoted),
             ]
         );
@@ -413,6 +429,7 @@ mod test {
             tokens,
             vec![
                 Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Word("hi".into(), Quoting::Unquoted),
                 Token::Operator(Operator::Semicolon),
             ]
@@ -427,8 +444,24 @@ mod test {
             tokens,
             vec![
                 Token::Word("hello".into(), Quoting::Unquoted),
+                Token::Whitespace,
                 Token::Operator(Operator::And),
+                Token::Whitespace,
                 Token::Word("world".into(), Quoting::Unquoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_multiple_whitespace() {
+        let parser = Parser::new();
+        let tokens = parser.tokenize("echo  hi");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("echo".into(), Quoting::Unquoted),
+                Token::Whitespace,
+                Token::Word("hi".into(), Quoting::Unquoted),
             ]
         );
     }
