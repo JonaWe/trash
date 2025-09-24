@@ -1,7 +1,7 @@
 use nix::sys::signal::{SigHandler, Signal, signal};
-use nix::sys::wait::waitpid;
+use nix::sys::wait::{waitpid, WaitStatus};
 use nix::unistd::{
-    ForkResult, Pid, chdir, execvp, fork, getpgrp, getpid, setpgid, tcsetpgrp, write,
+    ForkResult, Pid, chdir, execvp, fork, getpid, setpgid, tcsetpgrp, write,
 };
 use regex::Regex;
 use std::env;
@@ -208,7 +208,6 @@ struct Shell {
     last_status: i32,
     stdin_handle: std::io::Stdin,
     stdout_handle: std::io::Stdout,
-    variable_regex: Regex,
     // TODO: jobs table
 }
 
@@ -227,14 +226,11 @@ impl Shell {
         setpgid(shell_pid, shell_pid)?;
         tcsetpgrp(&stdin, shell_pid)?;
 
-        let variable_regex = Regex::new(r"\$([a-zA-Z0-9_]+|\$|!)").unwrap();
-
         Ok(Self {
             last_status: 0,
             shell_pid: shell_pid,
             stdin_handle: stdin,
             stdout_handle: stdout,
-            variable_regex,
         })
     }
 
@@ -260,22 +256,28 @@ impl Shell {
         }
     }
 
-    fn execute(&self, command: Command) -> nix::Result<()> {
+    fn execute(&mut self, command: Command) -> nix::Result<()> {
         match command {
             Command::Builtin(builtin) => self.handle_builtin(builtin),
-            Command::External(external) => self.spawn_foreground(external),
+            Command::External(external) => {
+                let status = self.spawn_foreground(external)?;
+                if let WaitStatus::Exited(_, code) = status {
+                    self.last_status = code;
+                }
+                Ok(())
+            },
         }
     }
 
-    fn spawn_foreground(&self, command: ExternalCommand) -> nix::Result<()> {
+    fn spawn_foreground(&self, command: ExternalCommand) -> nix::Result<WaitStatus> {
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child, .. }) => {
                 let _ = setpgid(child, child);
                 let _ = tcsetpgrp(&std::io::stdin(), child);
                 // maybe WUNTRACED/WCONTINUED later for ctrl-z job controll
-                waitpid(child, None).unwrap();
-                let pgid = getpgrp();
-                let _ = tcsetpgrp(&std::io::stdin(), pgid);
+                let status = waitpid(child, None)?;
+                let _ = tcsetpgrp(&std::io::stdin(), self.shell_pid);
+                Ok(status)
             }
             Ok(ForkResult::Child) => {
                 let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
@@ -285,9 +287,9 @@ impl Shell {
             }
             Err(_) => {
                 println!("Fork failed");
+                Err(nix::Error::EINVAL)
             }
         }
-        Ok(())
     }
 
     fn handle_builtin(&self, builtin: BuiltinCommand) -> nix::Result<()> {
@@ -356,6 +358,7 @@ fn main() {
     shell.run().expect("Failed to run shell");
 }
 
+#[cfg(test)]
 mod test {
     use super::*;
 
